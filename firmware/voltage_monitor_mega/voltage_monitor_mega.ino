@@ -1,70 +1,93 @@
 /*
   Rig 1: Voltage Monitor Proto Franken-Rig
 
-  Arduino Mega sketch for proving the barrel-jack supply rail before adding
-  CAN, ESP32, TFT/LVGL, or RealDash-style HUD hardware.
-
   Wiring:
-    Barrel jack + ---- R1 30k ---- A2 ---- R2 10k ---- GND
-    Barrel jack - ------------------------------------ GND
+    Supply + ---- R1 30k ---- A2 ---- R2 10k ---- GND
+    Supply - ------------------------------- Mega GND
+    Recommended: 100 nF ceramic from A2 to GND.
 
-  The divider ratio is 4:1, so a 9 V input appears as about 2.25 V on A2.
+  Calibrate ADC_REFERENCE_VOLTS and the two resistor values with a multimeter.
+  Prototype limit: 16 V DC. This input is not protected against vehicle transients.
 */
 
 const byte VOLTAGE_SENSE_PIN = A2;
 
-const float ADC_REFERENCE_VOLTS = 5.0;
-const float ADC_MAX_COUNT = 1023.0;
+// Bench calibration values: replace with measured values before final use.
+const float ADC_REFERENCE_VOLTS = 5.000;
 const float DIVIDER_R1_OHMS = 30000.0;
 const float DIVIDER_R2_OHMS = 10000.0;
-const float DIVIDER_RATIO = (DIVIDER_R1_OHMS + DIVIDER_R2_OHMS) / DIVIDER_R2_OHMS;
+const float ADC_MAX_COUNT = 1023.0;
+const float DIVIDER_RATIO =
+    (DIVIDER_R1_OHMS + DIVIDER_R2_OHMS) / DIVIDER_R2_OHMS;
 
+const float DOCUMENTED_MAX_INPUT_VOLTS = 16.0;
+const int ADC_OVER_RANGE_COUNT = 820;  // About 4.0 V at A2 with a 5 V reference.
 const unsigned long SAMPLE_INTERVAL_MS = 250;
 const byte SAMPLES_PER_READING = 16;
 const float SMOOTHING_ALPHA = 0.20;
 
+struct VoltageReading {
+  uint16_t rawAverage;
+  float inputVolts;
+};
+
 float smoothedSupplyVolts = 0.0;
 unsigned long lastSampleMs = 0;
 
-float readSupplyVoltage() {
+VoltageReading readSupplyVoltage() {
   unsigned long rawTotal = 0;
 
+  // Discard one conversion after startup/mux settling, then average 16 samples.
+  analogRead(VOLTAGE_SENSE_PIN);
   for (byte sample = 0; sample < SAMPLES_PER_READING; sample++) {
     rawTotal += analogRead(VOLTAGE_SENSE_PIN);
     delay(2);
   }
 
-  const float rawAverage = rawTotal / float(SAMPLES_PER_READING);
-  const float sensedVolts = (rawAverage * ADC_REFERENCE_VOLTS) / ADC_MAX_COUNT;
-  return sensedVolts * DIVIDER_RATIO;
+  VoltageReading reading;
+  reading.rawAverage =
+      (rawTotal + (SAMPLES_PER_READING / 2)) / SAMPLES_PER_READING;
+  const float sensedVolts =
+      (reading.rawAverage * ADC_REFERENCE_VOLTS) / ADC_MAX_COUNT;
+  reading.inputVolts = sensedVolts * DIVIDER_RATIO;
+  return reading;
 }
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial) {
-    ;
-  }
+  analogReference(DEFAULT);
 
-  smoothedSupplyVolts = readSupplyVoltage();
+  const VoltageReading initial = readSupplyVoltage();
+  smoothedSupplyVolts = initial.inputVolts;
 
   Serial.println(F("Rig 1 Voltage Monitor Proto Franken-Rig"));
-  Serial.println(F("Pin: A2 | Divider: 30k over 10k | Serial: 115200 baud"));
-  Serial.println(F("voltage_v,obd2_pid_42_style_v"));
+  Serial.println(F("Calibrate ADC reference and resistor values before final use."));
+  Serial.println(F("time_ms,adc_raw,input_v,filtered_v,status"));
 }
 
 void loop() {
   const unsigned long nowMs = millis();
-
   if (nowMs - lastSampleMs < SAMPLE_INTERVAL_MS) {
     return;
   }
-
   lastSampleMs = nowMs;
 
-  const float supplyVolts = readSupplyVoltage();
-  smoothedSupplyVolts = (SMOOTHING_ALPHA * supplyVolts) + ((1.0 - SMOOTHING_ALPHA) * smoothedSupplyVolts);
+  const VoltageReading reading = readSupplyVoltage();
+  smoothedSupplyVolts =
+      (SMOOTHING_ALPHA * reading.inputVolts) +
+      ((1.0 - SMOOTHING_ALPHA) * smoothedSupplyVolts);
 
-  Serial.print(smoothedSupplyVolts, 2);
+  const bool overRange =
+      reading.rawAverage >= ADC_OVER_RANGE_COUNT ||
+      reading.inputVolts > DOCUMENTED_MAX_INPUT_VOLTS;
+
+  Serial.print(nowMs);
   Serial.print(F(","));
-  Serial.println(smoothedSupplyVolts, 2);
+  Serial.print(reading.rawAverage);
+  Serial.print(F(","));
+  Serial.print(reading.inputVolts, 3);
+  Serial.print(F(","));
+  Serial.print(smoothedSupplyVolts, 3);
+  Serial.print(F(","));
+  Serial.println(overRange ? F("OVER_RANGE") : F("OK"));
 }

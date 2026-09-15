@@ -1,41 +1,50 @@
 # Rolling Dev Station Build Notes
 
-## Current Rig
+## Rig 1 Signal Path
 
-Rig 1 is the voltage-monitoring proof rig:
+1. Nominal 9 V centre-positive supply enters through the barrel jack.
+2. A fused logic branch powers the Arduino Mega through its barrel jack/VIN path.
+3. A 30 kΩ / 10 kΩ divider samples that rail at `A2`.
+4. A 100 nF ceramic capacitor from `A2` to GND filters local wiring noise.
+5. USB Serial reports raw, calculated, and filtered voltage for comparison with a multimeter.
 
-1. Stacked Arduino Mega in the 3D-printed case.
-2. Proto board mounted on top like the kit photo.
-3. 9 V native barrel-jack rail monitored through a resistor divider.
-4. `A2` reads the divided voltage.
-5. Serial output reports the real supply voltage live.
-6. A carbon-fibre gauge image becomes the target visual style for a later voltage needle driven by real OBD2-style voltage data.
+## Power and Ground Layout
 
-## Cabinet and Bench Layout
-
-- The 1.4 m fold-up bench is the main work surface.
-- The raised laptop barricade section protects the laptop and keeps it separated from loose wiring.
-- The wheeled speaker cabinet rolls under or beside the bench.
-- The cabinet carries electronics that should stay wired together:
-  - Arduino Mega voltage monitor stack
-  - Nakamichi DSP
-  - Power distribution
-  - Future CAN and ESP32 modules
-  - Optional TFT/LVGL or HUD display test hardware
+- Put the fuse close to the DC source, before the cable crosses the cabinet or hinge area.
+- For the first Mega-only test, use a 500 mA fuse or a current-limited bench supply set near 250 mA. Increase the branch rating only after measuring the real load.
+- Give the Mega/logic and Nakamichi DSP separate fused branches from one documented distribution point.
+- Return both branches to the same distribution ground point; do not make the ADC sense return share a long DSP/speaker-current path.
+- Keep the `A2` sense pair short and routed away from USB, speaker, motor, relay, and switching-regulator wiring.
+- Do not connect an external 9 V rail to the Mega `5V` pin.
 
 ## Quick-Release Connections
 
-Use detachable leads between the bench and cabinet so they can split quickly:
+- Use keyed connectors so positive and ground cannot be reversed.
+- Label both ends with voltage, polarity, source, destination, and fuse rating.
+- Provide strain relief at the bench and cabinet; rolling or folding must not pull on headers or proto-board joints.
+- Use a connector/contact rated above the branch fuse and expected current.
+- Prefer a connector arrangement that cannot leave signal wires connected while their ground is disconnected.
+- Keep USB/programming separate from DSP/audio cabling and the high-current power bundle.
 
-- One labelled USB lead for programming/Serial.
-- One fused DC feed for the electronics stack.
-- Optional separate audio/DSP cable bundle.
-- Strain relief at both ends so rolling the cabinet never tugs directly on boards.
+## Minimum Pre-Power Checks
 
-## Expansion Path
+With all power disconnected:
 
-1. Confirm stable 9 V rail using the Mega Serial monitor.
-2. Add the gauge UI and map the live voltage value to the needle angle.
-3. Add CAN/OBD2 input once the power rail is proven.
-4. Move from Serial-only output to a TFT/LVGL or RealDash-style HUD screen.
-5. Add more boards only after the distro, fusing, and ground layout are documented.
+1. Confirm the supply polarity and actual open-circuit voltage.
+2. Confirm no short between supply positive and ground.
+3. Measure R1 and R2 in isolation; update the firmware constants if they are not nominal.
+4. Confirm continuity: supply negative → Mega GND → R2 ground.
+5. Confirm continuity: divider midpoint → `A2`, and no continuity from supply positive directly to `A2`.
+6. Inspect that the 100 nF capacitor is from `A2` to GND, not across the incoming supply by mistake.
+
+## Staged Power-Up
+
+1. **USB only:** upload the sketch, open Serial at 115200 baud, and measure the Mega `5V` pin. Update `ADC_REFERENCE_VOLTS` if required.
+2. **Divider test only:** use a current-limited 5 V source, common the grounds, and verify about 1.25 V at `A2` before connecting the divider midpoint to the Mega.
+3. **A2 connected:** confirm Serial reads within the greater of ±0.10 V or ±2% of the multimeter reading.
+4. **9 V barrel input:** current-limit first power-up where possible. Stop if `A2` exceeds 4.0 V, Serial reports `OVER_RANGE`, polarity is wrong, or current is unexpectedly high.
+5. **Move/fold test:** power down, operate the bench and cabinet through their full travel, then reinspect strain relief and exposed conductors before re-energising.
+
+## Expansion Gate
+
+Add the gauge UI, CAN/OBD2 interface, TFT/LVGL hardware, ESP32 modules, or DSP only after the voltage reading is calibrated and the fused distribution/ground map is documented. This prototype is limited to 16 V DC and is not protected for direct vehicle transients or load dump.
